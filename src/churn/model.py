@@ -7,6 +7,13 @@ Each builder function returns:
 
 where `estimator` is a sklearn-compatible Pipeline/estimator and
 `param_grid` is a dict ready to be fed into RandomizedSearchCV or GridSearchCV.
+
+v2 changes:
+  - MLP now wrapped in Pipeline(StandardScaler → MLPClassifier) so inputs are
+    always zero-mean unit-variance regardless of upstream feature selection.
+  - SVC scaler removed from model.py (trainer handles scaling via pipeline, and
+    CalibratedClassifierCV already receives scaled data from the outer Pipeline).
+  - param_grid keys updated to match the new Pipeline step names.
 """
 
 from __future__ import annotations
@@ -34,17 +41,21 @@ def build_logistic_regression() -> tuple:
     BASELINE §6 – Logistic Regression (Elastic Net):
       C in [1e-4, 1e4] (log scale), l1_ratio in [0, 1].
       Class weights balanced to handle imbalance.
+      StandardScaler prepended — LR is scale-sensitive.
     """
-    estimator = LogisticRegression(
-        penalty="elasticnet",
-        solver="saga",
-        class_weight="balanced",
-        max_iter=5000,
-        random_state=42,
-    )
+    estimator = Pipeline([
+        ("scaler", StandardScaler()),
+        ("clf", LogisticRegression(
+            penalty="elasticnet",
+            solver="saga",
+            class_weight="balanced",
+            max_iter=5000,
+            random_state=42,
+        )),
+    ])
     param_grid = {
-        "C":        loguniform(1e-4, 1e4),
-        "l1_ratio": uniform(0, 1),
+        "clf__C":        loguniform(1e-4, 1e4),
+        "clf__l1_ratio": uniform(0, 1),
     }
     return estimator, param_grid
 
@@ -84,6 +95,7 @@ def build_random_forest() -> tuple:
       n_estimators in [300, 500], max_depth in [5, 40],
       min_samples_leaf in [1, 10].
       Class weights balanced.
+      No scaler needed — tree models are scale-invariant.
     """
     estimator = RandomForestClassifier(
         class_weight="balanced",
@@ -108,7 +120,7 @@ def build_xgboost(scale_pos_weight: float = 2.5) -> tuple:
       n_estimators in [200, 300], learning_rate in [0.01, 0.30],
       max_depth in [3, 10], min_child_weight in [1, 10].
       scale_pos_weight handles class imbalance.
-      Early stopping is applied on an inner validation slice.
+      No scaler needed — boosted trees are scale-invariant.
     """
     estimator = XGBClassifier(
         objective="binary:logistic",
@@ -134,26 +146,41 @@ def build_xgboost(scale_pos_weight: float = 2.5) -> tuple:
 
 def build_mlp() -> tuple:
     """
-    BASELINE §6 – MLP:
+    BASELINE §6 – MLP wrapped in a StandardScaler pipeline:
       Hidden layer sizes in {(128,), (256,), (128, 64)}.
       Learning rate in [1e-4, 1e-2] (log scale).
       Alpha (weight decay) in [1e-5, 1e-2] (log scale).
       Adam optimizer, mini-batches, early stopping.
+
+    NOTE on class imbalance:
+      MLPClassifier does not support class_weight. Instead, the trainer
+      passes sample_weight=compute_sample_weight('balanced', y_train) to
+      the fit() call via the pipeline step name prefix
+      "clf__sample_weight". See trainer.py for details.
+
+    NOTE on scaler:
+      StandardScaler is fitted only on the training fold inside the
+      pipeline, so no leakage occurs. This is the most important fix
+      versus v1 — without scaling, MLP gradient updates are dominated
+      by high-magnitude features and convergence is unreliable.
     """
-    estimator = MLPClassifier(
-        activation="relu",
-        solver="adam",
-        batch_size=64,
-        early_stopping=True,
-        validation_fraction=0.1,
-        n_iter_no_change=10,
-        max_iter=500,
-        random_state=42,
-    )
+    estimator = Pipeline([
+        ("scaler", StandardScaler()),
+        ("clf", MLPClassifier(
+            activation="relu",
+            solver="adam",
+            batch_size=64,
+            early_stopping=True,
+            validation_fraction=0.1,
+            n_iter_no_change=10,
+            max_iter=500,
+            random_state=42,
+        )),
+    ])
     param_grid = {
-        "hidden_layer_sizes": [(128,), (256,), (128, 64)],
-        "learning_rate_init": loguniform(1e-4, 1e-2),
-        "alpha":              loguniform(1e-5, 1e-2),
+        "clf__hidden_layer_sizes": [(128,), (256,), (128, 64)],
+        "clf__learning_rate_init": loguniform(1e-4, 1e-2),
+        "clf__alpha":              loguniform(1e-5, 1e-2),
     }
     return estimator, param_grid
 

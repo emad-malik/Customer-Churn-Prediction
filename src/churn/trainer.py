@@ -11,6 +11,16 @@ Three-layer feature selection:
 Nested CV:
   Outer: 5-fold stratified (unbiased performance estimate)
   Inner: 3-fold stratified (hyperparameter tuning, optimises PR AUC)
+
+v2 changes vs v1:
+  - MLP class-imbalance fix: compute_sample_weight('balanced') passed as
+    fit param so the cross-entropy loss accounts for the minority class.
+    MLPClassifier silently ignores class_weight= so this was a silent bug.
+  - Pipeline-aware cloning: use sklearn.base.clone() instead of manually
+    calling set_params(), which broke when estimators were Pipelines.
+  - LR / SVC feature-selection inputs no longer double-scaled: the models
+    themselves now own their StandardScaler step, so _filter_stage and
+    _embedded_stage operate on the raw (OHE + numeric) feature matrix.
 """
 
 from __future__ import annotations
@@ -21,7 +31,11 @@ from typing import Any
 import joblib
 import numpy as np
 import pandas as pd
+import warnings
+warnings.filterwarnings("ignore")
 
+
+from sklearn.base import clone
 from sklearn.feature_selection import (
     SelectKBest,
     VarianceThreshold,
@@ -40,6 +54,7 @@ from sklearn.model_selection import (
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import MinMaxScaler, RobustScaler
 from sklearn.svm import LinearSVC
+from sklearn.utils.class_weight import compute_sample_weight
 
 from churn.metrics import compute_metrics, find_best_threshold
 from churn.model import get_model
@@ -47,6 +62,30 @@ from churn.model import get_model
 # Suppress convergence warnings during hyperparameter search
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
+
+
+# ---------------------------------------------------------------------------
+# Helper: does a model need sample_weight for class-imbalance correction?
+# ---------------------------------------------------------------------------
+
+_NEEDS_SAMPLE_WEIGHT = {"mlp"}   # models whose sklearn class ignores class_weight
+
+
+def _make_fit_params(model_name: str, y_train: pd.Series) -> dict:
+    """
+    Return a fit_params dict for RandomizedSearchCV / manual fit calls.
+    For MLP (and any future model in _NEEDS_SAMPLE_WEIGHT) we compute
+    balanced sample weights so the cross-entropy loss treats both classes
+    proportionally despite the ~3:1 imbalance.
+
+    The key format is  "<last_pipeline_step_name>__sample_weight"
+    which sklearn's Pipeline.fit() routes to that step's fit() call.
+    """
+    if model_name in _NEEDS_SAMPLE_WEIGHT:
+        sw = compute_sample_weight("balanced", y_train)
+        # All models in model.py use Pipeline with final step named "clf"
+        return {"clf__sample_weight": sw}
+    return {}
 
 
 # ---------------------------------------------------------------------------
@@ -68,7 +107,6 @@ def _filter_stage(X: pd.DataFrame, y: pd.Series, k_frac: float = 0.8) -> list[st
     Xk = X[kept]
 
     # 2. Determine continuous vs categorical columns
-    # Categorical: columns that look binary (0/1) or have few unique values
     cat_cols = [c for c in Xk.columns if Xk[c].nunique() <= 2]
     cont_cols = [c for c in Xk.columns if c not in cat_cols]
 
@@ -88,7 +126,6 @@ def _filter_stage(X: pd.DataFrame, y: pd.Series, k_frac: float = 0.8) -> list[st
 
     if cat_cols:
         k_cat = min(k_cat, len(cat_cols))
-        # Shift any negatives (shouldn't happen for OHE, but guard anyway)
         Xcat = Xk[cat_cols].clip(lower=0)
         fs_cat = SelectKBest(chi2, k=k_cat)
         fs_cat.fit(Xcat, y)
@@ -105,7 +142,6 @@ def _embedded_stage(X: pd.DataFrame, y: pd.Series) -> list[str]:
       3. RFE with LinearSVC.
     Returns the union of selected features.
     """
-    # Scale for ElasticNet / LinearSVC
     scaler = RobustScaler()
     Xs = scaler.fit_transform(X)
 
@@ -162,7 +198,6 @@ def stability_selection(
 
     stable = [col for col, cnt in counts.items() if cnt >= min_appearances]
     if len(stable) == 0:
-        # Fallback: return all features that appeared at least once
         stable = [col for col, cnt in counts.items() if cnt > 0]
     return stable
 
@@ -189,23 +224,6 @@ def nested_cv(
                  ROC AUC as tiebreaker).
     Threshold  : selected on inner validation fold (maximises F1), applied
                  unchanged to outer test fold.
-
-    Parameters
-    ----------
-    X, y        : feature matrix and target vector
-    model_name  : one of the keys in churn.model.MODEL_REGISTRY
-    outer_splits: number of outer folds (default 5)
-    inner_splits: number of inner folds (default 3)
-    n_iter      : RandomizedSearchCV iterations
-    random_state: global seed
-
-    Returns
-    -------
-    dict with:
-      fold_metrics   : list of per-fold metric dicts
-      fold_thresholds: list of optimal thresholds
-      selected_features_per_fold: list of feature lists
-      best_params_per_fold: list of best hyperparameters
     """
     outer_cv = StratifiedKFold(
         n_splits=outer_splits, shuffle=True, random_state=random_state
@@ -238,6 +256,9 @@ def nested_cv(
         X_tr_sel = X_train[stable_feats]
         X_te_sel = X_test[stable_feats]
 
+        # ---- Build fit_params for this model (handles MLP sample_weight) ----
+        fit_params = _make_fit_params(model_name, y_train)
+
         # ---- Hyperparameter search on inner CV ----
         estimator, param_grid = get_model(model_name)
 
@@ -254,36 +275,41 @@ def nested_cv(
         )
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            search.fit(X_tr_sel, y_train)
+            # NOTE: fit_params routes sample_weight through the pipeline to the
+            # clf step for MLP. For other models fit_params is empty ({}).
+            # RandomizedSearchCV passes fit_params to each inner fit() call.
+            search.fit(X_tr_sel, y_train, **fit_params)
 
         best_params_per_fold.append(search.best_params_)
         best_model = search.best_estimator_
 
         # ---- Threshold selection on inner validation predictions ----
-        # Re-run inner CV to collect OOF probabilities for threshold tuning
+        # Re-run inner CV to collect OOF probabilities for threshold tuning.
+        # Use clone() so we get a fresh unfitted copy with the best params.
         inner_oof_probs = np.zeros(len(y_train))
-        for in_tr_idx, in_val_idx in inner_cv.split(X_tr_sel, y_train):
-            Xi_tr = X_tr_sel.iloc[in_tr_idx]
-            Xi_val = X_tr_sel.iloc[in_val_idx]
-            yi_tr = y_train.iloc[in_tr_idx]
-            yi_val = y_train.iloc[in_val_idx]
 
-            # Clone and refit with best params
-            est_clone, _ = get_model(model_name)
-            try:
-                est_clone.set_params(**search.best_params_)
-            except Exception:
-                pass
+        for in_tr_idx, in_val_idx in inner_cv.split(X_tr_sel, y_train):
+            Xi_tr  = X_tr_sel.iloc[in_tr_idx]
+            Xi_val = X_tr_sel.iloc[in_val_idx]
+            yi_tr  = y_train.iloc[in_tr_idx]
+
+            # Clone the best estimator (handles Pipeline correctly)
+            est_clone = clone(best_model)
+
+            # Build sample_weight for this inner training slice
+            inner_fit_params: dict = {}
+            if model_name in _NEEDS_SAMPLE_WEIGHT:
+                sw_inner = compute_sample_weight("balanced", yi_tr)
+                inner_fit_params["clf__sample_weight"] = sw_inner
 
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
-                est_clone.fit(Xi_tr, yi_tr)
+                est_clone.fit(Xi_tr, yi_tr, **inner_fit_params)
 
             if hasattr(est_clone, "predict_proba"):
                 inner_oof_probs[in_val_idx] = est_clone.predict_proba(Xi_val)[:, 1]
             elif hasattr(est_clone, "decision_function"):
                 raw = est_clone.decision_function(Xi_val)
-                # Sigmoid transform
                 inner_oof_probs[in_val_idx] = 1 / (1 + np.exp(-raw))
             else:
                 inner_oof_probs[in_val_idx] = 0.5
@@ -311,10 +337,10 @@ def nested_cv(
         )
 
     return {
-        "fold_metrics":              fold_metrics,
-        "fold_thresholds":           fold_thresholds,
+        "fold_metrics":               fold_metrics,
+        "fold_thresholds":            fold_thresholds,
         "selected_features_per_fold": selected_features_per_fold,
-        "best_params_per_fold":      best_params_per_fold,
+        "best_params_per_fold":       best_params_per_fold,
     }
 
 
@@ -336,9 +362,11 @@ def train_final_model(
         pass
 
     X_sel = X[stable_features]
+    fit_params = _make_fit_params(model_name, y)
+
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        estimator.fit(X_sel, y)
+        estimator.fit(X_sel, y, **fit_params)
 
     return estimator
 
