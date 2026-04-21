@@ -2,16 +2,79 @@
 __pycache__/
 *.py[oc]
 *.pyd
+*.so
+*.dylib
 build/
 dist/
 wheels/
 *.egg-info/
 
+# Packaging
+.Python
+pip-wheel-metadata/
+
+# Test and type-check caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.hypothesis/
+.pytype/
+
+# Coverage
+.coverage
+.coverage.*
+htmlcov/
+
 # Virtual environments
 .venv/
+venv/
+env/
+.env/
 
 # uv
 .uv/
+uv.lock.bak
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+*.jks
+
+# Logs and runtime files
+*.log
+*.pid
+*.out
+*.err
+
+# Jupyter
+.ipynb_checkpoints/
+
+# ML artifacts and experiment tracking
+mlruns/
+outputs/models/
+outputs/plots/
+
+# Model binaries and temporary data artifacts
+*.joblib
+*.pkl
+*.pickle
+*.onnx
+*.h5
+*.pt
+*.pth
+*.npz
+*.npy
+
+# Local database files
+*.db
+*.sqlite
+*.sqlite3
 
 # OS
 .DS_Store

@@ -1,0 +1,32 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: 'churn-mlops'
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+rule_files: []
+
+scrape_configs:
+  # ── MLflow service (for MLflow metrics) ─────────────────────────
+  - job_name: 'mlflow'
+    static_configs:
+      - targets: ['mlflow:5000']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+
+  # ── FastAPI application (for inference metrics) ────────────────
+  - job_name: 'fastapi'
+    static_configs:
+      - targets: ['fastapi_app:8000']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+
+  # ── Prometheus itself ──────────────────────────────────────────
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
