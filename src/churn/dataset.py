@@ -1,229 +1,218 @@
-"""churn prediction dataset and preprocessing.
-
-Implements BASELINE.md Sections 1–3:
-  1. Data Acquisition and Initial Cleaning
-  2. Preprocessing and Encoding
-  3. Feature Engineering
-"""
+"""Data loading, cleaning, and feature engineering for the Telco churn dataset."""
 
 from __future__ import annotations
 
-import pathlib
-from typing import Tuple
-
-import numpy as np
 import pandas as pd
+import numpy as np
+from pathlib import Path
+from sklearn.model_selection import train_test_split
 
-# ---------------------------------------------------------------------------
-# Column groups
-# ---------------------------------------------------------------------------
-BINARY_YES_NO = [
-    "Partner", "Dependents", "PhoneService", "PaperlessBilling", "Churn",
-    "MultipleLines", "OnlineSecurity", "OnlineBackup",
-    "DeviceProtection", "TechSupport", "StreamingTV", "StreamingMovies",
+
+# ── Columns ─────────────────────────────────────────────────────────────────
+
+DROP_COLS = ["customerID"]
+
+BINARY_COLS = [
+    "gender", "Partner", "Dependents", "PhoneService",
+    "PaperlessBilling", "Churn",
 ]
 
-# Columns that need Yes/No → 1/0 but may also have "No internet service" / "No phone service"
-ADDON_COLS = [
-    "MultipleLines", "OnlineSecurity", "OnlineBackup",
+ORDINAL_MAP = {
+    "Contract": {"Month-to-month": 0, "One year": 1, "Two year": 2},
+}
+
+NOMINAL_COLS = [
+    "MultipleLines", "InternetService", "OnlineSecurity", "OnlineBackup",
     "DeviceProtection", "TechSupport", "StreamingTV", "StreamingMovies",
+    "PaymentMethod",
 ]
 
-NOMINAL_CATS = ["gender", "InternetService", "PaymentMethod"]
+NUMERIC_COLS = ["tenure", "MonthlyCharges", "TotalCharges", "SeniorCitizen"]
 
-CONTRACT_ORDER = {"Month-to-month": 0, "One year": 1, "Two year": 2}
 
-CONTINUOUS_COLS = ["tenure", "MonthlyCharges", "TotalCharges"]
-
-# Tenure bins: 0-6, 7-12, 13-24, 25-36, 36+
-TENURE_BINS = [0, 6, 12, 24, 36, np.inf]
-TENURE_LABELS = ["0-6", "7-12", "13-24", "25-36", "36+"]
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
-def load_raw(path: str | pathlib.Path) -> pd.DataFrame:
-    """Read the CSV and return a raw DataFrame."""
+def load_raw(path: str | Path) -> pd.DataFrame:
+    """Load raw CSV and return with consistent dtypes."""
     df = pd.read_csv(path)
+    # TotalCharges is sometimes blank for brand-new customers (tenure=0)
+    df["TotalCharges"] = (
+        df["TotalCharges"]
+        .astype(str)
+        .str.strip()
+        .replace("", "0")
+        .astype(float)
+    )
     return df
 
 
-def clean(df: pd.DataFrame) -> pd.DataFrame:
+def encode(df: pd.DataFrame) -> pd.DataFrame:
     """
-    BASELINE §1 – Initial cleaning.
-
-    * Trim whitespace in TotalCharges, coerce blanks → 0.
-    * Drop customerID.
-    * Drop any obvious data-leakage identifiers.
+    Apply binary mapping, ordinal encoding, and one-hot encoding.
+    Returns a fully numeric DataFrame ready for modelling.
     """
     df = df.copy()
 
-    # Fix TotalCharges: blank entries for brand-new customers (tenure == 0)
-    df["TotalCharges"] = df["TotalCharges"].astype(str).str.strip()
-    df["TotalCharges"] = pd.to_numeric(df["TotalCharges"], errors="coerce").fillna(0.0)
+    # Drop identifiers
+    df.drop(columns=[c for c in DROP_COLS if c in df.columns], inplace=True)
 
-    # Drop identifier
-    df.drop(columns=["customerID"], inplace=True, errors="ignore")
+    # Binary: Yes/No and gender → 1/0
+    for col in BINARY_COLS:
+        if col not in df.columns:
+            continue
+        if df[col].dtype == object:
+            mapping = {"Yes": 1, "No": 0, "Male": 1, "Female": 0}
+            df[col] = df[col].map(mapping).fillna(df[col])
 
-    return df
-
-
-def encode_binary(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    BASELINE §2 – Map Yes/No fields to 1/0.
-
-    Add-on service columns may contain "No internet service" or
-    "No phone service"; treat these the same as "No" → 0.
-    """
-    df = df.copy()
-
-    for col in ADDON_COLS:
+    # Ordinal
+    for col, mapping in ORDINAL_MAP.items():
         if col in df.columns:
-            df[col] = df[col].map(
-                lambda x: 1 if str(x).strip().lower() == "yes" else 0
-            )
+            df[col] = df[col].map(mapping)
 
-    simple_binary = [c for c in BINARY_YES_NO if c in df.columns and c not in ADDON_COLS]
-    for col in simple_binary:
-        df[col] = df[col].map({"Yes": 1, "No": 0})
+    # One-hot
+    existing_nominal = [c for c in NOMINAL_COLS if c in df.columns]
+    df = pd.get_dummies(df, columns=existing_nominal, drop_first=True)
 
-    # gender: Female → 0, Male → 1
-    if "gender" in df.columns:
-        df["gender"] = df["gender"].map({"Female": 0, "Male": 1})
+    # Ensure all remaining object columns are cast numerically
+    for col in df.select_dtypes("object").columns:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    return df
+    return df.infer_objects()
 
 
-def encode_contract(df: pd.DataFrame, ordered: bool = True) -> pd.DataFrame:
+def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
     """
-    BASELINE §2 – Contract encoding.
-
-    * ordered=True  → ordinal integers (for trees / boosting)
-    * ordered=False → one-hot (for linear / MLP)
-    """
-    df = df.copy()
-    if ordered:
-        df["Contract"] = df["Contract"].map(CONTRACT_ORDER).astype(int)
-    else:
-        ohe = pd.get_dummies(df["Contract"], prefix="Contract", drop_first=True)
-        df = pd.concat([df.drop(columns=["Contract"]), ohe], axis=1)
-    return df
-
-
-def one_hot_nominals(df: pd.DataFrame, drop_first: bool = True) -> pd.DataFrame:
-    """
-    BASELINE §2 – One-hot encode nominal categoricals.
-
-    * drop_first=True  for linear / MLP (avoid perfect multicollinearity)
-    * drop_first=False for trees / boosting
-    """
-    df = df.copy()
-    cols = [c for c in NOMINAL_CATS if c in df.columns]
-    for col in cols:
-        ohe = pd.get_dummies(df[col], prefix=col, drop_first=drop_first)
-        df = pd.concat([df.drop(columns=[col]), ohe], axis=1)
-    return df
-
-
-def add_engineered_features(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    BASELINE §3 – Feature engineering.
-
-    * Tenure Bins (ordinal 0-4)
-    * High Charge Flag (within-sample upper quartile — caller must pass the
-      quartile value when computing in-fold; here we use the full-sample
-      quartile for the first pass)
-    * Contract × MonthlyCharges interaction
-    * Fiber flag + Fiber × MonthlyCharges interaction
-    * NumAdminTickets proxy (not present in standard dataset → set to 0)
-    * NumTechTickets proxy (TechSupport inverse as ordinal) capped at 5
-    * TechTickets² quadratic term
-    * ChargesPerTenure = TotalCharges / max(tenure, 1)
+    Feature engineering based on the paper's §3.2:
+      - Tenure bins (early life vs. protected zone)
+      - High charge flag
+      - Contract × Charge interaction
+      - Technical ticket features (capped + quadratic)
+      - Charges per tenure proxy
     """
     df = df.copy()
 
-    # -- Tenure Bins --
-    df["TenureBin"] = pd.cut(
-        df["tenure"],
-        bins=TENURE_BINS,
-        labels=[0, 1, 2, 3, 4],
-        right=True,
-        include_lowest=True,
-    ).astype(int)
+    # Tenure bins: 0-6, 7-12, 13-24, 25-36, >36
+    bins = [-1, 6, 12, 24, 36, float("inf")]
+    labels = [0, 1, 2, 3, 4]
+    df["tenure_bin"] = pd.cut(df["tenure"], bins=bins, labels=labels).astype(int)
 
-    # -- High Charge Flag --
+    # High charge flag (above 75th percentile of training data)
     q75 = df["MonthlyCharges"].quantile(0.75)
-    df["HighChargeFlag"] = (df["MonthlyCharges"] > q75).astype(int)
+    df["high_charge_flag"] = (df["MonthlyCharges"] > q75).astype(int)
 
-    # -- Contract × MonthlyCharges --
-    # If Contract was already encoded to int (ordered), use it directly;
-    # otherwise fall back to a numeric proxy.
-    if "Contract" in df.columns and pd.api.types.is_integer_dtype(df["Contract"]):
-        df["ContractByCharge"] = df["Contract"] * df["MonthlyCharges"]
-    else:
-        # one-hot branch: use TenureBin as proxy for term length
-        df["ContractByCharge"] = df["TenureBin"] * df["MonthlyCharges"]
+    # Contract × Charge interaction (only if Contract is ordinal-encoded)
+    if "Contract" in df.columns:
+        df["contract_x_charge"] = df["Contract"] * df["MonthlyCharges"]
 
-    # -- Fiber flag --
-    if "InternetService" in df.columns:
-        df["FiberFlag"] = (df["InternetService"] == "Fiber optic").astype(int)
-    elif "InternetService_Fiber optic" in df.columns:
-        df["FiberFlag"] = df["InternetService_Fiber optic"].astype(int)
-    else:
-        df["FiberFlag"] = 0
+    # Technical ticket features — numTechTickets column may exist in
+    # expanded datasets; create a synthetic proxy from TechSupport otherwise
+    if "numTechTickets" not in df.columns:
+        tech_col = [c for c in df.columns if "TechSupport" in c]
+        if tech_col:
+            df["numTechTickets"] = df[tech_col[0]]  # binary proxy
+        else:
+            df["numTechTickets"] = 0
 
-    df["FiberByCharge"] = df["FiberFlag"] * df["MonthlyCharges"]
+    df["tickets_capped"] = df["numTechTickets"].clip(upper=5)
+    df["tickets_sq"] = df["tickets_capped"] ** 2
 
-    # -- Tech Tickets proxy --
-    # The standard dataset has TechSupport (binary 0/1 after encoding).
-    # We create a 0-5 scale: no support → 5 tickets, support → 0.
-    if "TechSupport" in df.columns and pd.api.types.is_integer_dtype(df["TechSupport"]):
-        df["TechTickets"] = (1 - df["TechSupport"]) * 5
-    else:
-        df["TechTickets"] = 0
+    # Charges per tenure (avoid division by zero for new customers)
+    df["charges_per_tenure"] = df["MonthlyCharges"] / (df["tenure"] + 1)
 
-    df["TechTickets"] = df["TechTickets"].clip(upper=5)
-    df["TechTickets2"] = df["TechTickets"] ** 2
-
-    # -- Charges per Tenure --
-    df["ChargesPerTenure"] = df["TotalCharges"] / df["tenure"].replace(0, 1)
+    # Fiber interaction
+    fiber_col = [c for c in df.columns if "InternetService_Fiber" in c]
+    if fiber_col:
+        df["fiber_x_charge"] = df[fiber_col[0]] * df["MonthlyCharges"]
 
     return df
+
+
+def prepare(
+    path: str | Path,
+    engineer: bool = True,
+) -> tuple[pd.DataFrame, pd.Series]:
+    """
+    Full pipeline: load → encode → (optionally) engineer features.
+    Returns (X, y).
+    """
+    df = load_raw(path)
+    df = encode(df)
+    if engineer:
+        df = engineer_features(df)
+
+    y = df.pop("Churn").astype(int)
+    X = df.select_dtypes(include=[np.number]).fillna(0)
+    return X, y
+
+def temporal_split(
+    X: pd.DataFrame,
+    y: pd.Series,
+    train_frac: float = 0.70,
+) -> tuple[pd.DataFrame, pd.Series, pd.DataFrame, pd.Series]:
+    """
+    Simulate concept drift by treating the first `train_frac` of rows as
+    'production data' and the remainder as 'new incoming data'.
+    The dataset is NOT shuffled — row order acts as a time proxy.
+    """
+    split = int(len(X) * train_frac)
+    return (
+        X.iloc[:split].copy(), y.iloc[:split].copy(),
+        X.iloc[split:].copy(), y.iloc[split:].copy(),
+    )
 
 
 def build_features(
     df: pd.DataFrame,
     drop_first: bool = True,
     contract_ordered: bool = True,
-    high_charge_q75: float | None = None,
-) -> Tuple[pd.DataFrame, pd.Series]:
+    engineer: bool = True,
+) -> tuple[pd.DataFrame, pd.Series]:
     """
-    Full preprocessing pipeline:
-      clean → encode binary → encode contract → one-hot nominals
-      → engineer features → split X / y.
-
+    Legacy API wrapper — encode and engineer features with flexible options.
+    
     Parameters
     ----------
-    drop_first : bool
-        Drop reference OHE level (True for linear/MLP, False for trees).
-    contract_ordered : bool
-        Use ordinal contract encoding (True for trees, False for linear/MLP).
-    high_charge_q75 : float, optional
-        Precomputed upper quartile for HighChargeFlag (use fold's training
-        quartile to avoid leakage). If None, computed from `df`.
+    df : pd.DataFrame
+        Raw input dataframe
+    drop_first : bool, default=True
+        Whether to drop the first category in one-hot encoding
+    contract_ordered : bool, default=True
+        Whether to use ordinal encoding for Contract (vs. one-hot)
+    engineer : bool, default=True
+        Whether to apply feature engineering
+        
+    Returns
+    -------
+    X, y : (pd.DataFrame, pd.Series)
     """
-    df = clean(df)
-    df = encode_binary(df)
-    df = encode_contract(df, ordered=contract_ordered)
-    df = one_hot_nominals(df, drop_first=drop_first)
-    df = add_engineered_features(df)
-
-    # Override HighChargeFlag with fold-specific quartile if provided
-    if high_charge_q75 is not None:
-        df["HighChargeFlag"] = (df["MonthlyCharges"] > high_charge_q75).astype(int)
-        df["FiberByCharge"] = df["FiberFlag"] * df["MonthlyCharges"]
-
-    y = df.pop("Churn").astype(int)
-    X = df.copy()
-    return X, y
+    df = df.copy()
+    df.drop(columns=[c for c in DROP_COLS if c in df.columns], inplace=True)
+    
+    # Binary encoding
+    for col in BINARY_COLS:
+        if col not in df.columns:
+            continue
+        if df[col].dtype == object:
+            mapping = {"Yes": 1, "No": 0, "Male": 1, "Female": 0}
+            df[col] = df[col].map(mapping).fillna(df[col])
+    
+    # Ordinal encoding for Contract
+    if contract_ordered:
+        for col, mapping in ORDINAL_MAP.items():
+            if col in df.columns:
+                df[col] = df[col].map(mapping)
+    
+    # One-hot encoding (excluding Contract if ordinal)
+    nominal = [c for c in NOMINAL_COLS if c in df.columns]
+    if not contract_ordered and "Contract" in df.columns:
+        nominal.append("Contract")
+    if nominal:
+        df = pd.get_dummies(df, columns=nominal, drop_first=drop_first)
+    
+    # Engineer features if requested
+    if engineer:
+        df = engineer_features(df)
+    
+    # Extract target and return numeric features
+    y = df.pop("Churn").astype(int) if "Churn" in df.columns else None
+    X = df.select_dtypes(include=[np.number]).fillna(0)
+    
+    return (X, y) if y is not None else (X, None)

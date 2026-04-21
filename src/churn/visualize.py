@@ -51,7 +51,6 @@ def _get_explainer(model: Any, X_background: pd.DataFrame):
         last_step = list(model.named_steps.values())[-1]
         return _get_explainer(last_step, X_background)
 
-    # Fall back to the model-agnostic KernelExplainer (slow but universal)
     predict_fn = (
         model.predict_proba if hasattr(model, "predict_proba")
         else model.predict

@@ -1,19 +1,7 @@
-"""Churn prediction models.
+"""Model registry — all five baseline models plus LightGBM and Stacking Ensemble.
 
-BASELINE §6 – Model Configurations and Hyperparameters.
-
-Each builder function returns:
-  (estimator, param_grid)
-
-where `estimator` is a sklearn-compatible Pipeline/estimator and
-`param_grid` is a dict ready to be fed into RandomizedSearchCV or GridSearchCV.
-
-v2 changes:
-  - MLP now wrapped in Pipeline(StandardScaler → MLPClassifier) so inputs are
-    always zero-mean unit-variance regardless of upstream feature selection.
-  - SVC scaler removed from model.py (trainer handles scaling via pipeline, and
-    CalibratedClassifierCV already receives scaled data from the outer Pipeline).
-  - param_grid keys updated to match the new Pipeline step names.
+Each builder returns (estimator, param_grid) where estimator is a
+sklearn-compatible object and param_grid feeds RandomizedSearchCV.
 """
 
 from __future__ import annotations
@@ -22,7 +10,7 @@ import numpy as np
 from scipy.stats import loguniform, randint, uniform
 
 from sklearn.calibration import CalibratedClassifierCV
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier, StackingClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.neural_network import MLPClassifier
 from sklearn.pipeline import Pipeline
@@ -30,24 +18,18 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 
 from xgboost import XGBClassifier
+from lightgbm import LGBMClassifier
 
 
-# ---------------------------------------------------------------------------
-# 1. Logistic Regression (Elastic Net)
-# ---------------------------------------------------------------------------
+# ── 1. Logistic Regression (Elastic Net) ────────────────────────────────────
 
 def build_logistic_regression() -> tuple:
-    """
-    BASELINE §6 – Logistic Regression (Elastic Net):
-      C in [1e-4, 1e4] (log scale), l1_ratio in [0, 1].
-      Class weights balanced to handle imbalance.
-      StandardScaler prepended — LR is scale-sensitive.
-    """
     estimator = Pipeline([
         ("scaler", StandardScaler()),
         ("clf", LogisticRegression(
             penalty="elasticnet",
             solver="saga",
+            l1_ratio=0.5,
             class_weight="balanced",
             max_iter=5000,
             random_state=42,
@@ -60,20 +42,11 @@ def build_logistic_regression() -> tuple:
     return estimator, param_grid
 
 
-# ---------------------------------------------------------------------------
-# 2. Support Vector Classifier (RBF)
-# ---------------------------------------------------------------------------
+# ── 2. SVC (RBF) ─────────────────────────────────────────────────────────────
 
 def build_svc() -> tuple:
-    """
-    BASELINE §6 – SVC (RBF kernel):
-      C in [1e2, 1e3] (log scale), gamma in [1e-4, 1].
-      StandardScaler included in the pipeline.
-      Outputs calibrated with CalibratedClassifierCV (Platt/sigmoid).
-    """
     base_svc = SVC(kernel="rbf", probability=False, class_weight="balanced", random_state=42)
     calibrated = CalibratedClassifierCV(base_svc, method="sigmoid", cv=3)
-
     estimator = Pipeline([
         ("scaler", StandardScaler()),
         ("clf",    calibrated),
@@ -85,18 +58,9 @@ def build_svc() -> tuple:
     return estimator, param_grid
 
 
-# ---------------------------------------------------------------------------
-# 3. Random Forest
-# ---------------------------------------------------------------------------
+# ── 3. Random Forest ──────────────────────────────────────────────────────────
 
 def build_random_forest() -> tuple:
-    """
-    BASELINE §6 – Random Forest:
-      n_estimators in [300, 500], max_depth in [5, 40],
-      min_samples_leaf in [1, 10].
-      Class weights balanced.
-      No scaler needed — tree models are scale-invariant.
-    """
     estimator = RandomForestClassifier(
         class_weight="balanced",
         random_state=42,
@@ -110,18 +74,9 @@ def build_random_forest() -> tuple:
     return estimator, param_grid
 
 
-# ---------------------------------------------------------------------------
-# 4. XGBoost
-# ---------------------------------------------------------------------------
+# ── 4. XGBoost ────────────────────────────────────────────────────────────────
 
 def build_xgboost(scale_pos_weight: float = 2.5) -> tuple:
-    """
-    BASELINE §6 – XGBoost:
-      n_estimators in [200, 300], learning_rate in [0.01, 0.30],
-      max_depth in [3, 10], min_child_weight in [1, 10].
-      scale_pos_weight handles class imbalance.
-      No scaler needed — boosted trees are scale-invariant.
-    """
     estimator = XGBClassifier(
         objective="binary:logistic",
         eval_metric="aucpr",
@@ -140,30 +95,10 @@ def build_xgboost(scale_pos_weight: float = 2.5) -> tuple:
     return estimator, param_grid
 
 
-# ---------------------------------------------------------------------------
-# 5. Multilayer Perceptron (MLP)
-# ---------------------------------------------------------------------------
+# ── 5. MLP ───────────────────────────────────────────────────────────────────
 
 def build_mlp() -> tuple:
-    """
-    BASELINE §6 – MLP wrapped in a StandardScaler pipeline:
-      Hidden layer sizes in {(128,), (256,), (128, 64)}.
-      Learning rate in [1e-4, 1e-2] (log scale).
-      Alpha (weight decay) in [1e-5, 1e-2] (log scale).
-      Adam optimizer, mini-batches, early stopping.
-
-    NOTE on class imbalance:
-      MLPClassifier does not support class_weight. Instead, the trainer
-      passes sample_weight=compute_sample_weight('balanced', y_train) to
-      the fit() call via the pipeline step name prefix
-      "clf__sample_weight". See trainer.py for details.
-
-    NOTE on scaler:
-      StandardScaler is fitted only on the training fold inside the
-      pipeline, so no leakage occurs. This is the most important fix
-      versus v1 — without scaling, MLP gradient updates are dominated
-      by high-magnitude features and convergence is unreliable.
-    """
+    """MLP wrapped in StandardScaler pipeline. sample_weight handled in trainer."""
     estimator = Pipeline([
         ("scaler", StandardScaler()),
         ("clf", MLPClassifier(
@@ -185,9 +120,103 @@ def build_mlp() -> tuple:
     return estimator, param_grid
 
 
-# ---------------------------------------------------------------------------
-# Registry
-# ---------------------------------------------------------------------------
+# ── 6. LightGBM ───────────────────────────────────────────────────────────────
+
+def build_lightgbm(class_weight: str = "balanced") -> tuple:
+    """
+    LightGBM with dart boosting type for better generalisation on small-medium
+    tabular datasets. class_weight='balanced' handles the 3:1 imbalance natively.
+    Borderline-SMOTE oversampling is applied *before* this model is fitted
+    in the training script (not inside the pipeline) to avoid leakage.
+    """
+    estimator = LGBMClassifier(
+        boosting_type="dart",
+        objective="binary",
+        metric="average_precision",
+        class_weight=class_weight,
+        n_jobs=-1,
+        random_state=42,
+        verbose=-1,
+    )
+    param_grid = {
+        "n_estimators":    randint(200, 600),
+        "learning_rate":   loguniform(0.005, 0.3),
+        "max_depth":       randint(3, 12),
+        "num_leaves":      randint(20, 120),
+        "min_child_samples": randint(10, 60),
+        "subsample":       uniform(0.6, 0.4),       # [0.6, 1.0]
+        "colsample_bytree": uniform(0.5, 0.5),      # [0.5, 1.0]
+        "reg_alpha":       loguniform(1e-4, 1.0),
+        "reg_lambda":      loguniform(1e-4, 1.0),
+    }
+    return estimator, param_grid
+
+
+# ── 7. Stacking Ensemble ──────────────────────────────────────────────────────
+
+def build_stacking_ensemble(
+    xgb_params: dict | None = None,
+    lgbm_params: dict | None = None,
+) -> tuple:
+    """
+    Stacking ensemble:
+      Base learners : XGBoost + LightGBM (tuned params injected after CV)
+      Meta-learner  : Logistic Regression (with StandardScaler)
+      passthrough   : True → meta-learner also sees original features
+
+    param_grid is empty because the base learners are pre-tuned before
+    constructing the stack. Call build_stacking_ensemble(xgb_params, lgbm_params)
+    with the best params from each model's nested CV.
+    """
+    _xgb_params = {
+        "objective": "binary:logistic",
+        "eval_metric": "aucpr",
+        "scale_pos_weight": 2.5,
+        "use_label_encoder": False,
+        "random_state": 42,
+        "n_jobs": -1,
+        "verbosity": 0,
+        **(xgb_params or {}),
+    }
+    _lgbm_params = {
+        "boosting_type": "dart",
+        "objective": "binary",
+        "class_weight": "balanced",
+        "n_jobs": -1,
+        "random_state": 42,
+        "verbose": -1,
+        **(lgbm_params or {}),
+    }
+
+    base_learners = [
+        ("xgb",  XGBClassifier(**_xgb_params)),
+        ("lgbm", LGBMClassifier(**_lgbm_params)),
+    ]
+
+    meta = Pipeline([
+        ("scaler", StandardScaler()),
+        ("lr", LogisticRegression(
+            C=1.0,
+            class_weight="balanced",
+            solver="lbfgs",
+            max_iter=1000,
+            random_state=42,
+        )),
+    ])
+
+    estimator = StackingClassifier(
+        estimators=base_learners,
+        final_estimator=meta,
+        cv=5,                   # inner CV for generating meta-features
+        stack_method="predict_proba",
+        passthrough=True,       # meta-learner sees base proba + raw features
+        n_jobs=-1,
+    )
+    # No further hyperparameter search — base learners already tuned
+    return estimator, {}
+
+
+# ── Registry ──────────────────────────────────────────────────────────────────
 
 MODEL_REGISTRY: dict[str, callable] = {
     "logistic_regression": build_logistic_regression,
@@ -195,11 +224,12 @@ MODEL_REGISTRY: dict[str, callable] = {
     "random_forest":       build_random_forest,
     "xgboost":             build_xgboost,
     "mlp":                 build_mlp,
+    "lightgbm":            build_lightgbm,
+    "stacking_ensemble":   build_stacking_ensemble,
 }
 
 
-def get_model(name: str) -> tuple:
-    """Return (estimator, param_grid) for the named model."""
+def get_model(name: str, **kwargs) -> tuple:
     if name not in MODEL_REGISTRY:
         raise ValueError(f"Unknown model '{name}'. Available: {list(MODEL_REGISTRY)}")
-    return MODEL_REGISTRY[name]()
+    return MODEL_REGISTRY[name](**kwargs)
