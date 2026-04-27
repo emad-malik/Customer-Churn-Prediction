@@ -29,8 +29,8 @@ from sklearn.utils.class_weight import compute_sample_weight
 
 from imblearn.over_sampling import BorderlineSMOTE
 
-from churn.metrics import compute_metrics, find_best_threshold
-from churn.model import get_model
+from src.churn.metrics import compute_metrics, find_best_threshold
+from src.churn.model import get_model
 
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)

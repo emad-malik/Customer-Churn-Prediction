@@ -1,0 +1,18 @@
+{
+  "TotalCharges":0.0059960789,
+  "contract_x_charge":0.0058782877,
+  "PhoneService":0.003802042,
+  "tenure":0.0031661846,
+  "charges_per_tenure":0.0031383411,
+  "tenure_bin":0.0027160103,
+  "MonthlyCharges":0.0018014349,
+  "fiber_x_charge":0.0015026182,
+  "SeniorCitizen":0.0006896534,
+  "Dependents":0.000624685,
+  "PaperlessBilling":0.0005901677,
+  "high_charge_flag":0.0004420368,
+  "Contract":0.0004352183,
+  "tickets_sq":0.0003784499,
+  "gender":0.0002035416,
+  "Partner":0.0001961254
+}

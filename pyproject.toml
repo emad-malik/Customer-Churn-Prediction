@@ -3,15 +3,15 @@ name = "Churn-Prediction"
 version = "0.1.0"
 description = "Churn Prediction on Telco Customer Churn"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 dependencies = [
     "numpy==1.26.4",
-    "pandas==2.2.2",
+    "pandas==2.3.2",
     "scikit-learn==1.4.2",
     "xgboost==2.0.3",
     "shap>=0.45",
-    "matplotlib==3.8.4",
-    "scipy==1.13.0",
+    "matplotlib==3.10.7",
+    "scipy==1.16.2",
     "joblib==1.4.2",
     "lightgbm==4.3.0",
     "imbalanced-learn==0.12.3",

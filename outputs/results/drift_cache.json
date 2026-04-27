@@ -1,0 +1,31 @@
+{
+  "prediction_psi": 0.00908030367799131,
+  "mean_feature_psi": 0.0019725547404985206,
+  "status": "STABLE \ud83d\udfe2",
+  "performance": {
+    "reference": {
+      "accuracy": 0.7569979716024341,
+      "f1": 0.6426014319809069,
+      "roc_auc": 0.8634282988181534,
+      "pr_auc": 0.678411542227466
+    },
+    "current": {
+      "accuracy": 0.7662091812588736,
+      "f1": 0.6550279329608939,
+      "roc_auc": 0.858911982364982,
+      "pr_auc": 0.6942055065736265
+    }
+  },
+  "top_drifted_features": {
+    "TotalCharges": 0.005996078916294086,
+    "contract_x_charge": 0.005878287659219522,
+    "PhoneService": 0.0038020420441537074,
+    "tenure": 0.0031661846368964694,
+    "charges_per_tenure": 0.0031383410816979494,
+    "tenure_bin": 0.0027160102669384336,
+    "MonthlyCharges": 0.001801434877411176,
+    "fiber_x_charge": 0.001502618169971645,
+    "SeniorCitizen": 0.0006896534042702845,
+    "Dependents": 0.0006246850390190435
+  }
+}

@@ -3,9 +3,9 @@ scikit-learn==1.4.2
 xgboost==2.0.3
 lightgbm==4.3.0
 imbalanced-learn==0.12.3
-scipy==1.13.0
+scipy==1.16.2
 numpy==1.26.4
-pandas==2.2.2
+pandas==2.3.2
 
 # ── MLflow ─────────────────────────────────────────────────────────────────
 mlflow==2.13.0
@@ -26,7 +26,7 @@ prometheus-fastapi-instrumentator==6.1.0
 evidently==0.4.30
 
 # ── Plotting / reporting ───────────────────────────────────────────────────
-matplotlib==3.8.4
+matplotlib==3.10.7
 seaborn==0.13.2
 
 # ── Utilities ──────────────────────────────────────────────────────────────
@@ -34,3 +34,4 @@ joblib==1.4.2
 pyyaml==6.0.1
 python-dotenv==1.0.1
 tqdm==4.66.4
+setuptools>=65.0.0,<81.0.0

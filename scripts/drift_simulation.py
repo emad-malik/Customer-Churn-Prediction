@@ -32,13 +32,14 @@ from pathlib import Path
 
 import joblib
 import numpy as np
+import pandas as pd
 import requests
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 warnings.filterwarnings("ignore")
 
 from src.churn.dataset import prepare, temporal_split
-from src.churn.drift import (
+from src.churn.drfit import (
     compute_feature_psi,
     compute_prediction_psi,
     performance_comparison,
@@ -122,6 +123,12 @@ def main():
     # ── PSI ──────────────────────────────────────────────────────────────────
     print("\nComputing feature-level PSI...")
     feature_psi = compute_feature_psi(X_ref, X_cur)
+
+    # Persist full feature PSI list for reporting
+    feature_psi_json = RESULTS_DIR / "feature_psi_full.json"
+    feature_psi_csv = RESULTS_DIR / "feature_psi_full.csv"
+    feature_psi.to_json(feature_psi_json, indent=2)
+    feature_psi.to_frame(name="psi").to_csv(feature_psi_csv, index_label="feature")
 
     pred_psi = compute_prediction_psi(proba_ref, proba_cur)
     mean_psi = overall_psi(feature_psi)

@@ -34,7 +34,7 @@ This project extends the Zerine et al. (2026) churn benchmark into a complete ML
 
 - Windows, Linux, or macOS
 - Docker and Docker Compose
-- Python 3.12+
+- Python 3.14
 - uv package manager (recommended) or pip
 
 ## Project Setup
@@ -50,7 +50,14 @@ uv sync
 If you use pip instead:
 
 ```bash
-pip install -e .
+py -3.14 -m pip install -e .
+```
+
+Windows CMD venv activation:
+
+```cmd
+cd /d C:\Users\emaad\Downloads\Telco-Churn-Prediction
+.\.venv\Scripts\activate.bat
 ```
 
 ### 2) Train all models and log runs
