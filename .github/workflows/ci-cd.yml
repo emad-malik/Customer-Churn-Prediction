@@ -1,0 +1,81 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-test:
+    name: Lint & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Lint with ruff
+        run: uv run ruff check src/
+
+      - name: Run tests
+        run: uv run pytest tests/ -v
+
+  build-inference:
+    name: Build Inference Image
+    runs-on: ubuntu-latest
+    needs: lint-and-test
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build inference Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/inference/Dockerfile
+          target: runtime
+          push: false
+          tags: churn-inference:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  build-training:
+    name: Build Training Image
+    runs-on: ubuntu-latest
+    needs: lint-and-test
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build training Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/training/Dockerfile
+          target: runtime
+          push: false
+          tags: churn-training:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

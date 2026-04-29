@@ -1,6 +1,6 @@
 """
-scripts/drift_simulation.py
-============================
+churn/drift_simulation.py
+==========================
 Simulate concept drift by splitting the dataset temporally:
   - First 70% → "production reference" data (model was trained on this)
   - Last 30%  → "new incoming data" with shifted distribution
@@ -18,7 +18,7 @@ Steps
 
 Usage
 -----
-    python scripts/drift_simulation.py --data data/WA_Fn-UseC_-Telco-Customer-Churn.csv
+    churn-drift-simulation --data data/WA_Fn-UseC_-Telco-Customer-Churn.csv
 """
 
 from __future__ import annotations
@@ -34,18 +34,17 @@ import joblib
 import numpy as np
 import requests
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
 warnings.filterwarnings("ignore")
 
-from src.churn.dataset import prepare, temporal_split
-from src.churn.drift import (
+from churn.dataset import prepare, temporal_split
+from churn.drift import (
     compute_feature_psi,
     compute_prediction_psi,
     performance_comparison,
     plot_drift_report,
     overall_psi,
 )
-from src.churn.tracking import setup_mlflow, log_drift_results
+from churn.tracking import setup_mlflow, log_drift_results
 
 OUTPUT_DIR   = Path("outputs")
 RESULTS_DIR  = OUTPUT_DIR / "results"

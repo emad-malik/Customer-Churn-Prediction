@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import pathlib
 import sys
 
@@ -13,11 +14,12 @@ import pandas as pd
 from churn.dataset import build_features, load_raw
 from churn.metrics import aggregate_fold_metrics, print_report
 from churn.model import MODEL_REGISTRY
+import joblib
+import mlflow
+
 from churn.trainer import (
     nested_cv,
     train_final_model,
-    save_model,
-    load_model,
 )
 from churn.visualize import (
     shap_beeswarm,
@@ -51,9 +53,9 @@ def train_main() -> None:
         help="Path to the Telco churn CSV file.",
     )
     parser.add_argument(
-        "--models", nargs="+", default=list(MODEL_REGISTRY.keys()),
+        "--models", nargs="+", default=["stacking_ensemble"],
         choices=list(MODEL_REGISTRY.keys()),
-        help="Which models to train (default: all).",
+        help="Which models to train (default: stacking_ensemble).",
     )
     parser.add_argument(
         "--outer-folds", type=int, default=5,
@@ -72,8 +74,8 @@ def train_main() -> None:
         help="Skip the three-layer feature selection step.",
     )
     parser.add_argument(
-        "--save-models", action="store_true",
-        help="Retrain final model on full data and persist to disk.",
+        "--save-models", action="store_true", default=True,
+        help="Retrain final model on full data and persist to disk (default: True).",
     )
     parser.add_argument(
         "--out-dir", default=str(DEFAULT_RESULTS_DIR),
@@ -84,6 +86,17 @@ def train_main() -> None:
         help="Global random seed.",
     )
     args = parser.parse_args()
+
+    # -- MLflow setup --
+    _mlflow_uri = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000")
+    try:
+        mlflow.set_tracking_uri(_mlflow_uri)
+        mlflow.set_experiment("churn_prediction")
+        _mlflow_enabled = True
+        print(f"MLflow tracking: {_mlflow_uri}")
+    except Exception as e:
+        _mlflow_enabled = False
+        print(f"MLflow unavailable ({e}) — skipping logging.")
 
     # -- Load and preprocess --
     print(f"Loading data from: {args.data}")
@@ -152,9 +165,54 @@ def train_main() -> None:
             med_idx = len(cv_result["best_params_per_fold"]) // 2
             final_params = cv_result["best_params_per_fold"][med_idx]
             stable_feats = cv_result["selected_features_per_fold"][med_idx]
-            final_model = train_final_model(X, y, model_name, final_params, stable_feats)
+            final_model = train_final_model(X, y, model_name, stable_feats, final_params)
             model_path = str(DEFAULT_MODELS_DIR / f"{model_name}.joblib")
-            save_model(final_model, model_path)
+            joblib.dump(final_model, model_path)
+            print(f"  Model saved to: {model_path}")
+
+        # -- MLflow logging --
+        if _mlflow_enabled:
+            try:
+                with mlflow.start_run(run_name=model_name):
+                    # Log mean metrics from CV
+                    for metric in cv_result["fold_metrics"][0].keys():
+                        mean_val = float(np.mean([f[metric] for f in cv_result["fold_metrics"]]))
+                        mlflow.log_metric(f"mean_{metric}", mean_val)
+
+                    # Log best params (median fold)
+                    med_idx = len(cv_result["best_params_per_fold"]) // 2
+                    for k, v in cv_result["best_params_per_fold"][med_idx].items():
+                        try:
+                            mlflow.log_param(k, v)
+                        except Exception:
+                            pass
+
+                    mlflow.set_tag("model", model_name)
+                    mlflow.set_tag("outer_folds", args.outer_folds)
+
+                    if args.save_models:
+                        mlflow.log_artifact(model_path)
+
+                    print(f"  MLflow run logged: {model_name}")
+            except Exception as e:
+                print(f"  MLflow logging failed ({e}) — continuing.")
+
+        # -- Pushgateway push (training metrics → Prometheus → Grafana) --
+        try:
+            from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
+            _pgw_url = os.getenv("PUSHGATEWAY_URL", "http://localhost:9091")
+            registry = CollectorRegistry()
+            for metric in ["accuracy", "f1", "roc_auc", "pr_auc", "precision", "recall"]:
+                mean_val = float(np.mean([f[metric] for f in cv_result["fold_metrics"] if metric in f]))
+                std_val  = float(np.std( [f[metric] for f in cv_result["fold_metrics"] if metric in f]))
+                g_mean = Gauge(f"churn_train_{metric}_mean", f"Mean CV {metric}", registry=registry)
+                g_std  = Gauge(f"churn_train_{metric}_std",  f"Std CV {metric}",  registry=registry)
+                g_mean.set(mean_val)
+                g_std.set(std_val)
+            push_to_gateway(_pgw_url, job=f"churn_train_{model_name}", registry=registry)
+            print(f"  Pushgateway metrics pushed: {_pgw_url}")
+        except Exception as e:
+            print(f"  Pushgateway push skipped ({e}).")
 
     # -- CV comparison plot --
     print("\nGenerating CV results comparison charts ...")
@@ -215,7 +273,7 @@ def evaluate_main() -> None:
     )
 
     print(f"Loading model from: {args.model_path}")
-    model = load_model(args.model_path)
+    model = joblib.load(args.model_path)
 
     # -- Metrics on full dataset (indicative, not a nested-CV estimate) --
     if hasattr(model, "predict_proba"):

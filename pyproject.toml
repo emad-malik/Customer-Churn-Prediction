@@ -30,6 +30,8 @@ dependencies = [
     "python-dotenv==1.0.1",
     "tqdm==4.66.4",
     "setuptools>=65.0.0,<81.0.0",
+    "ruff>=0.4.0",
+    "pytest>=8.0.0",
 ]
 
 [build-system]
@@ -40,5 +42,8 @@ build-backend = "hatchling.build"
 packages = ["src/churn"]
 
 [project.scripts]
-churn-train    = "churn.cli:train_main"
-churn-evaluate = "churn.cli:evaluate_main"
+churn-train           = "churn.cli:train_main"
+churn-evaluate        = "churn.cli:evaluate_main"
+churn-train-all       = "churn.train_all:main"
+churn-benchmark       = "churn.benchmark:main"
+churn-drift-simulation = "churn.drift_simulation:main"

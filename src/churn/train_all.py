@@ -1,13 +1,14 @@
 """
-scripts/train_all.py
-====================
-Train all seven models (five baseline + LightGBM + Stacking Ensemble),
-log every experiment to MLflow, register the best model in the registry.
+churn/train_all.py
+==================
+Train all seven models, log every experiment to MLflow,
+register the best model in the registry.
 
 Usage
 -----
-    python scripts/train_all.py --data data/WA_Fn-UseC_-Telco-Customer-Churn.csv
-    python scripts/train_all.py --data data/... --no-feature-selection --n-iter 10
+    churn-train-all
+    churn-train-all --data data/WA_Fn-UseC_-Telco-Customer-Churn.csv
+    churn-train-all --no-feature-selection --n-iter 10
 """
 
 from __future__ import annotations
@@ -15,21 +16,17 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import sys
 import warnings
 from pathlib import Path
 
 import numpy as np
 import joblib
 
-# Make src importable regardless of working directory
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from src.churn.dataset import prepare
-from src.churn.model import get_model
-from src.churn.trainer import nested_cv, train_final_model, stability_selection
-from src.churn.metrics import summarise_folds, plot_confusion_matrix, plot_roc_pr_curves
-from src.churn.tracking import setup_mlflow, log_cv_results, register_model
+from churn.dataset import prepare
+from churn.model import get_model
+from churn.trainer import nested_cv, train_final_model, stability_selection
+from churn.metrics import summarise_folds, plot_confusion_matrix, plot_roc_pr_curves
+from churn.tracking import setup_mlflow, log_cv_results, register_model
 
 warnings.filterwarnings("ignore")
 
@@ -137,7 +134,6 @@ def train_single(
     # ── MLflow ────────────────────────────────────────────────────────────
     mean_params = {}
     if results["best_params_per_fold"]:
-        # Log the median best hyperparameter for numeric values
         all_keys = set().union(*[p.keys() for p in results["best_params_per_fold"]])
         for k in all_keys:
             vals = [p[k] for p in results["best_params_per_fold"] if k in p]
@@ -191,11 +187,9 @@ def main():
             all_summaries[model_name] = summary
             all_run_ids[model_name]   = run_id
 
-            # Store representative best params for final retraining
             if results["best_params_per_fold"]:
                 best_params_by_model[model_name] = results["best_params_per_fold"][0]
 
-            # Capture best params for stacking ensemble construction
             if model_name == "xgboost" and results["best_params_per_fold"]:
                 xgb_best_params = results["best_params_per_fold"][0]
             if model_name == "lightgbm" and results["best_params_per_fold"]:
@@ -208,14 +202,12 @@ def main():
     # ── Benchmark comparison plot ────────────────────────────────────────────
     if all_summaries:
         try:
-            from src.churn.metrics import plot_benchmark_table
+            from churn.metrics import plot_benchmark_table
             bench_path = str(PLOTS_DIR / "benchmark_comparison.png")
             plot_benchmark_table(all_summaries, save_path=bench_path)
             print(f"\nBenchmark table saved: {bench_path}")
         except Exception as e:
             print(f"\nBenchmark plot skipped: {e}")
-    else:
-        print("\nNo successful model runs to plot benchmark.")
 
     # ── Select and register best model ──────────────────────────────────────
     if args.register_best and all_summaries:
@@ -225,7 +217,6 @@ def main():
         )
         print(f"\nBest model by PR-AUC: {best_name}")
 
-        # Retrain on full dataset
         stable_feats = stability_selection(X, y) if not args.no_feature_selection else X.columns.tolist()
 
         model_kwargs = {}
@@ -245,12 +236,10 @@ def main():
             model_kwargs=model_kwargs,
         )
 
-        # Save locally
         model_path = str(MODELS_DIR / f"{best_name}.joblib")
         joblib.dump(final_model, model_path)
         print(f"Final model saved: {model_path}")
 
-        # Register in MLflow
         try:
             register_model(
                 run_id=all_run_ids[best_name],

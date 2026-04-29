@@ -38,7 +38,7 @@ services:
   fastapi_app:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: docker/inference/Dockerfile
       target: runtime
     container_name: churn-api
     ports:
@@ -62,14 +62,44 @@ services:
     networks:
       - churn-net
 
-  # ── 3. Prometheus ────────────────────────────────────────────────────────
+  # ── 3. Training job ──────────────────────────────────────────────────────
+  training:
+    build:
+      context: .
+      dockerfile: docker/training/Dockerfile
+      target: runtime
+    container_name: churn-training
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+    volumes:
+      # Write trained models to host ./outputs so FastAPI can read them
+      - ./outputs:/app/outputs
+    depends_on:
+      mlflow:
+        condition: service_healthy
+    networks:
+      - churn-net
+    profiles:
+      - training   # only runs with: docker compose --profile training up
+
+  # ── 4. Prometheus Pushgateway ───────────────────────────────────────────
+  pushgateway:
+    image: prom/pushgateway:v1.8.0
+    container_name: churn-pushgateway
+    ports:
+      - "9091:9091"
+    networks:
+      - churn-net
+
+  # ── 5. Prometheus ────────────────────────────────────────────────────────
   prometheus:
     image: prom/prometheus:v2.52.0
     container_name: churn-prometheus
     ports:
       - "9090:9090"
     volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
       - prometheus-data:/prometheus
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
@@ -87,7 +117,7 @@ services:
     networks:
       - churn-net
 
-  # ── 4. Grafana ───────────────────────────────────────────────────────────
+  # ── 5. Grafana ───────────────────────────────────────────────────────────
   grafana:
     image: grafana/grafana:10.4.2
     container_name: churn-grafana
@@ -102,7 +132,7 @@ services:
       GF_UNIFIED_ALERTING_ENABLED: "true"
     volumes:
       - grafana-data:/var/lib/grafana
-      - ./grafana-provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana:/etc/grafana/provisioning:ro
     depends_on:
       - prometheus
     healthcheck:

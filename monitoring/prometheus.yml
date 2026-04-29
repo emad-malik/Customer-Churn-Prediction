@@ -9,21 +9,22 @@ alerting:
     - static_configs:
         - targets: []
 
-rule_files: []
+rule_files:
+  - /etc/prometheus/alert_rules.yml
 
 scrape_configs:
-  # ── MLflow service (for MLflow metrics) ─────────────────────────
-  - job_name: 'mlflow'
-    static_configs:
-      - targets: ['mlflow:5000']
-    metrics_path: '/metrics'
-    scrape_interval: 15s
-
   # ── FastAPI application (for inference metrics) ────────────────
   - job_name: 'fastapi'
     static_configs:
       - targets: ['fastapi_app:8000']
     metrics_path: '/metrics'
+    scrape_interval: 15s
+
+  # ── Pushgateway (for training metrics pushed after churn-train) ─
+  - job_name: 'pushgateway'
+    static_configs:
+      - targets: ['pushgateway:9091']
+    honor_labels: true
     scrape_interval: 15s
 
   # ── Prometheus itself ──────────────────────────────────────────

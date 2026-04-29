@@ -1,6 +1,6 @@
 """
-scripts/benchmark.py
-=====================
+churn/benchmark.py
+===================
 Run the full benchmark and produce the final results table comparing:
   Logistic Regression, SVC, Random Forest, XGBoost, MLP,
   LightGBM (+ Borderline-SMOTE), Stacking Ensemble.
@@ -10,8 +10,8 @@ otherwise runs the full evaluation (slow path).
 
 Usage
 -----
-    python scripts/benchmark.py --data data/WA_Fn-UseC_-Telco-Customer-Churn.csv
-    python scripts/benchmark.py --from-json   # load existing results
+    churn-benchmark --data data/WA_Fn-UseC_-Telco-Customer-Churn.csv
+    churn-benchmark --from-json   # load existing results
 """
 
 from __future__ import annotations
@@ -28,7 +28,6 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
 warnings.filterwarnings("ignore")
 
 RESULTS_DIR = Path("outputs/results")
@@ -82,9 +81,9 @@ def load_from_json() -> dict[str, dict]:
 
 def run_full_benchmark(args) -> dict[str, dict]:
     """Run the full nested-CV benchmark for all models."""
-    from src.churn.dataset import prepare
-    from src.churn.trainer import nested_cv
-    from src.churn.metrics import summarise_folds
+    from churn.dataset import prepare
+    from churn.trainer import nested_cv
+    from churn.metrics import summarise_folds
 
     print(f"Loading data: {args.data}")
     X, y = prepare(args.data, engineer=True)
@@ -211,7 +210,7 @@ def main():
         print("Loading results from existing JSON files...")
         our_results = load_from_json()
         if not our_results:
-            print("No JSON results found. Run train_all.py first.")
+            print("No JSON results found. Run churn-train-all first.")
             sys.exit(1)
     else:
         our_results = run_full_benchmark(args)
