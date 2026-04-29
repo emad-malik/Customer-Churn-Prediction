@@ -30,7 +30,6 @@ An end-to-end MLOps system for telecom customer churn prediction. Covers the ful
 - [Monitoring](#monitoring)
 - [Inference API](#inference-api)
 - [Project Structure](#project-structure)
-- [Troubleshooting](#troubleshooting)
 - [License](#license)
 
 ---
