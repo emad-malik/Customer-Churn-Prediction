@@ -1,8 +1,8 @@
 <div align="center">
 
-# Customer Churn Prediction
+# One Step Ahead
 
-**Production-Grade MLOps Pipeline on Telco Data**
+**Predicting and Preventing Customer Churn in Telecom**
 
 [![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://python.org)
 [![uv](https://img.shields.io/badge/uv-package_manager-5C4EE5)](https://docs.astral.sh/uv/)
@@ -13,7 +13,7 @@
 [![CI/CD](https://img.shields.io/badge/CI%2FCD-GitHub_Actions-2088FF?logo=githubactions&logoColor=white)](https://github.com/features/actions)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
-An end-to-end MLOps system for telecom customer churn prediction. Covers the full production lifecycle: nested cross-validation training, MLflow experiment tracking, FastAPI inference serving, drift simulation, and live observability via Prometheus, Grafana and Pushgateway.
+An end-to-end MLOps system for telecom customer churn prediction. Covers the full production lifecycle: nested cross-validation training, MLflow experiment tracking, FastAPI inference serving and live observability via Prometheus and Grafana.
 
 </div>
 
