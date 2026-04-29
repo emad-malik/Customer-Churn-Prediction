@@ -26,16 +26,11 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import sys
 import warnings
 from pathlib import Path
 
 import joblib
-import numpy as np
 import requests
-
-warnings.filterwarnings("ignore")
-
 from churn.dataset import prepare, temporal_split
 from churn.drift import (
     compute_feature_psi,
@@ -45,6 +40,8 @@ from churn.drift import (
     overall_psi,
 )
 from churn.tracking import setup_mlflow, log_drift_results
+
+warnings.filterwarnings("ignore")
 
 OUTPUT_DIR   = Path("outputs")
 RESULTS_DIR  = OUTPUT_DIR / "results"

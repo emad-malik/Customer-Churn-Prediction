@@ -6,10 +6,8 @@ import argparse
 import json
 import os
 import pathlib
-import sys
 
 import numpy as np
-import pandas as pd
 
 from churn.dataset import build_features, load_raw
 from churn.metrics import aggregate_fold_metrics, print_report

@@ -6,7 +6,6 @@ sklearn-compatible object and param_grid feeds RandomizedSearchCV.
 
 from __future__ import annotations
 
-import numpy as np
 from scipy.stats import loguniform, randint, uniform
 
 from sklearn.calibration import CalibratedClassifierCV

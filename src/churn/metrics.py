@@ -169,8 +169,8 @@ def plot_confusion_matrix(
     # Add counts in cells
     for i in range(2):
         for j in range(2):
-            text = ax.text(j, i, cm[i, j],
-                          ha="center", va="center", color="black", fontsize=12)
+            ax.text(j, i, cm[i, j],
+                    ha="center", va="center", color="black", fontsize=12)
     
     ax.set_ylabel("True Label", fontsize=11)
     ax.set_xlabel("Predicted Label", fontsize=11)

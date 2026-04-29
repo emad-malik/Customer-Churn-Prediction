@@ -23,7 +23,7 @@ import numpy as np
 import joblib
 
 from churn.dataset import prepare
-from churn.model import get_model
+
 from churn.trainer import nested_cv, train_final_model, stability_selection
 from churn.metrics import summarise_folds, plot_confusion_matrix, plot_roc_pr_curves
 from churn.tracking import setup_mlflow, log_cv_results, register_model
