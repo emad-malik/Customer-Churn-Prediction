@@ -181,10 +181,12 @@ drift = [
 ]
 inference = [
     { name = "fastapi" },
+    { name = "lightgbm" },
     { name = "mlflow" },
     { name = "prometheus-client" },
     { name = "pydantic" },
     { name = "uvicorn", extra = ["standard"] },
+    { name = "xgboost" },
 ]
 training = [
     { name = "imbalanced-learn" },
@@ -203,6 +205,7 @@ requires-dist = [
     { name = "imbalanced-learn", marker = "extra == 'training'", specifier = "==0.12.3" },
     { name = "joblib", specifier = "==1.4.2" },
     { name = "lightgbm", marker = "extra == 'drift'", specifier = "==4.3.0" },
+    { name = "lightgbm", marker = "extra == 'inference'", specifier = "==4.3.0" },
     { name = "lightgbm", marker = "extra == 'training'", specifier = "==4.3.0" },
     { name = "matplotlib", marker = "extra == 'drift'", specifier = "==3.8.4" },
     { name = "matplotlib", marker = "extra == 'training'", specifier = "==3.8.4" },
@@ -223,6 +226,7 @@ requires-dist = [
     { name = "shap", marker = "extra == 'training'", specifier = ">=0.45" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'inference'", specifier = "==0.29.0" },
     { name = "xgboost", marker = "extra == 'drift'", specifier = "==2.0.3" },
+    { name = "xgboost", marker = "extra == 'inference'", specifier = "==2.0.3" },
     { name = "xgboost", marker = "extra == 'training'", specifier = "==2.0.3" },
 ]
 provides-extras = ["training", "inference", "drift", "dev"]
