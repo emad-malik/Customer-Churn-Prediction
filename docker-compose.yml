@@ -36,10 +36,7 @@ services:
 
   # ── 2. FastAPI inference server ──────────────────────────────────────────
   fastapi_app:
-    build:
-      context: .
-      dockerfile: docker/inference/Dockerfile
-      target: runtime
+    image: 050007037432.dkr.ecr.us-east-1.amazonaws.com/churn-inference:latest
     container_name: churn-api
     ports:
       - "8000:8000"
@@ -49,7 +46,6 @@ services:
       MODEL_STAGE: Production
       LOG_LEVEL: info
     volumes:
-      # Mount outputs so trained models are accessible without rebuilding
       - ./outputs:/app/outputs:ro
     depends_on:
       mlflow:
@@ -64,15 +60,11 @@ services:
 
   # ── 3. Training job ──────────────────────────────────────────────────────
   training:
-    build:
-      context: .
-      dockerfile: docker/training/Dockerfile
-      target: runtime
+    image: 050007037432.dkr.ecr.us-east-1.amazonaws.com/churn-training:latest
     container_name: churn-training
     environment:
       MLFLOW_TRACKING_URI: http://mlflow:5000
     volumes:
-      # Write trained models to host ./outputs so FastAPI can read them
       - ./outputs:/app/outputs
     depends_on:
       mlflow:
@@ -82,7 +74,7 @@ services:
     profiles:
       - training   # only runs with: docker compose --profile training up
 
-  # ── 4. Prometheus Pushgateway ───────────────────────────────────────────
+  # ── 4. Prometheus Pushgateway ────────────────────────────────────────────
   pushgateway:
     image: prom/pushgateway:v1.8.0
     container_name: churn-pushgateway
@@ -117,7 +109,7 @@ services:
     networks:
       - churn-net
 
-  # ── 5. Grafana ───────────────────────────────────────────────────────────
+  # ── 6. Grafana ───────────────────────────────────────────────────────────
   grafana:
     image: grafana/grafana:10.4.2
     container_name: churn-grafana
@@ -127,7 +119,6 @@ services:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin
       GF_USERS_ALLOW_SIGN_UP: "false"
-      # Auto-provision datasource + dashboard
       GF_PATHS_PROVISIONING: /etc/grafana/provisioning
       GF_UNIFIED_ALERTING_ENABLED: "true"
     volumes:
