@@ -33,6 +33,7 @@ NUMERIC_COLS = ["tenure", "MonthlyCharges", "TotalCharges", "SeniorCitizen"]
 def load_raw(path: str | Path) -> pd.DataFrame:
     """Load raw CSV and return with consistent dtypes."""
     df = pd.read_csv(path)
+    df.columns = df.columns.str.strip()
     # TotalCharges is sometimes blank for brand-new customers (tenure=0)
     df["TotalCharges"] = (
         df["TotalCharges"]
@@ -51,6 +52,10 @@ def encode(df: pd.DataFrame) -> pd.DataFrame:
     """
     df = df.copy()
 
+    # Normalize string values to avoid category mismatches
+    for col in df.select_dtypes("object").columns:
+        df[col] = df[col].astype(str).str.strip()
+
     # Drop identifiers
     df.drop(columns=[c for c in DROP_COLS if c in df.columns], inplace=True)
 
@@ -67,13 +72,10 @@ def encode(df: pd.DataFrame) -> pd.DataFrame:
         if col in df.columns:
             df[col] = df[col].map(mapping)
 
-    # One-hot
-    existing_nominal = [c for c in NOMINAL_COLS if c in df.columns]
-    df = pd.get_dummies(df, columns=existing_nominal, drop_first=True)
-
-    # Ensure all remaining object columns are cast numerically
-    for col in df.select_dtypes("object").columns:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
+    # One-hot encode any remaining object columns (excluding target)
+    object_cols = [c for c in df.select_dtypes("object").columns if c != "Churn"]
+    if object_cols:
+        df = pd.get_dummies(df, columns=object_cols, drop_first=True)
 
     return df.infer_objects()
 
@@ -139,7 +141,7 @@ def prepare(
         df = engineer_features(df)
 
     y = df.pop("Churn").astype(int)
-    X = df.select_dtypes(include=[np.number]).fillna(0)
+    X = df.select_dtypes(include=[np.number, "bool"]).fillna(0)
     return X, y
 
 def temporal_split(

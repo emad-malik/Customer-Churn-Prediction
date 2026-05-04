@@ -9,7 +9,7 @@ from __future__ import annotations
 from scipy.stats import loguniform, randint, uniform
 
 from sklearn.calibration import CalibratedClassifierCV
-from sklearn.ensemble import RandomForestClassifier, StackingClassifier
+from sklearn.ensemble import ExtraTreesClassifier, RandomForestClassifier, StackingClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.neural_network import MLPClassifier
 from sklearn.pipeline import Pipeline
@@ -158,8 +158,8 @@ def build_stacking_ensemble(
     lgbm_params: dict | None = None,
 ) -> tuple:
     """
-    Stacking ensemble:
-      Base learners : XGBoost + LightGBM (tuned params injected after CV)
+        Stacking ensemble:
+            Base learners : XGBoost + LightGBM + ExtraTrees
       Meta-learner  : Logistic Regression (with StandardScaler)
       passthrough   : True → meta-learner also sees original features
 
@@ -187,9 +187,19 @@ def build_stacking_ensemble(
         **(lgbm_params or {}),
     }
 
+    extra = ExtraTreesClassifier(
+        n_estimators=600,
+        max_depth=16,
+        min_samples_leaf=2,
+        class_weight="balanced",
+        random_state=42,
+        n_jobs=-1,
+    )
+
     base_learners = [
         ("xgb",  XGBClassifier(**_xgb_params)),
         ("lgbm", LGBMClassifier(**_lgbm_params)),
+        ("extra", extra),
     ]
 
     meta = Pipeline([
@@ -206,12 +216,11 @@ def build_stacking_ensemble(
     estimator = StackingClassifier(
         estimators=base_learners,
         final_estimator=meta,
-        cv=5,                   # inner CV for generating meta-features
+        cv=5,
         stack_method="predict_proba",
-        passthrough=True,       # meta-learner sees base proba + raw features
+        passthrough=True,
         n_jobs=-1,
     )
-    # No further hyperparameter search — base learners already tuned
     return estimator, {}
 
 
