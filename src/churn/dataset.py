@@ -215,6 +215,6 @@ def build_features(
     
     # Extract target and return numeric features
     y = df.pop("Churn").astype(int) if "Churn" in df.columns else None
-    X = df.select_dtypes(include=[np.number]).fillna(0)
+    X = df.select_dtypes(include=[np.number, "bool"]).fillna(0)
     
     return (X, y) if y is not None else (X, None)

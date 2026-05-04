@@ -40,7 +40,7 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 _MAY_USE_SAMPLE_WEIGHT = {"mlp"}
 
 # ── Models that require SMOTE oversampling (applied only to training fold) ───
-_NEEDS_SMOTE = {"lightgbm"}
+_NEEDS_SMOTE = {"lightgbm", "stacking_ensemble"}
 
 # ── Models with no hyperparameter search (pre-tuned stacking) ────────────────
 _NO_SEARCH = {"stacking_ensemble"}
