@@ -24,6 +24,7 @@ services:
       mlflow server
         --backend-store-uri sqlite:////mlflow/mlflow.db
         --default-artifact-root /mlflow/artifacts
+        --serve-artifacts
         --host 0.0.0.0
         --port 5000
     healthcheck:
@@ -64,15 +65,18 @@ services:
     container_name: churn-training
     environment:
       MLFLOW_TRACKING_URI: http://mlflow:5000
+      PUSHGATEWAY_URL: http://pushgateway:9091
     volumes:
       - ./outputs:/app/outputs
     depends_on:
       mlflow:
         condition: service_healthy
+      pushgateway:
+        condition: service_started
     networks:
       - churn-net
     profiles:
-      - training   # only runs with: docker compose --profile training up
+      - training
 
   # ── 4. Prometheus Pushgateway ────────────────────────────────────────────
   pushgateway:
