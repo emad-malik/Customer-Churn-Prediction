@@ -26,6 +26,7 @@ import pandas as pd
 import mlflow.sklearn
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
@@ -144,7 +145,6 @@ def _load_local_fallback() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _load_model()
-    # Seed accuracy gauge so Grafana panel doesn't show 0
     ACCURACY_GAUGE.set(float(os.getenv("INITIAL_ACCURACY", "0.90")))
     yield
     logger.info("Shutting down.")
@@ -159,6 +159,13 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 # ── Request / response schemas ────────────────────────────────────────────────
 
@@ -171,7 +178,6 @@ class CustomerFeatures(BaseModel):
     Contract:            int   = Field(default=0,   ge=0, le=2,
                                        description="0=M2M, 1=1yr, 2=2yr")
     PaperlessBilling:    int   = Field(default=0,   ge=0, le=1)
-    # Add-ons / encoded categoricals — defaults to 0 (not subscribed)
     InternetService_DSL:          int = Field(default=0)
     InternetService_Fiber_optic:  int = Field(default=0)
     OnlineSecurity_Yes:           int = Field(default=0)
@@ -180,7 +186,6 @@ class CustomerFeatures(BaseModel):
     TechSupport_Yes:              int = Field(default=0)
     StreamingTV_Yes:              int = Field(default=0)
     StreamingMovies_Yes:          int = Field(default=0)
-    # Engineered features
     tenure_bin:          int   = Field(default=0)
     high_charge_flag:    int   = Field(default=0)
     charges_per_tenure:  float = Field(default=0.0)
@@ -188,7 +193,7 @@ class CustomerFeatures(BaseModel):
     tickets_sq:          float = Field(default=0.0)
 
     class Config:
-        extra = "allow"   # Allow extra fields so new features don't break old clients
+        extra = "allow"
 
 
 class PredictionResponse(BaseModel):
@@ -229,10 +234,8 @@ async def predict_single(customer: CustomerFeatures, request: Request):
     try:
         row = pd.DataFrame([customer.model_dump()])
         row = row.reindex(columns=_get_feature_cols(row), fill_value=0)
-
         prob = float(_model.predict_proba(row)[0, 1])
         pred = int(prob >= 0.5)
-
     finally:
         latency = time.perf_counter() - t0
         LATENCY_HIST.observe(latency)
@@ -300,10 +303,6 @@ async def drift_summary():
 
 @app.post("/metrics/update")
 async def update_gauges(accuracy: float, psi: float):
-    """
-    Allow the drift_simulation script to push live accuracy and PSI
-    into Prometheus gauges via the API (simulates real-time monitoring).
-    """
     ACCURACY_GAUGE.set(accuracy)
     PSI_GAUGE.set(psi)
     return {"updated": True}
@@ -312,16 +311,11 @@ async def update_gauges(accuracy: float, psi: float):
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def _get_feature_cols(df: pd.DataFrame) -> list[str]:
-    """
-    Return column list aligned with what the loaded model expects.
-    Falls back to the DataFrame's own columns if feature_names_in_ is absent.
-    """
     try:
         return list(_model.feature_names_in_)
     except AttributeError:
         pass
     try:
-        # StackingClassifier / Pipeline
         inner = _model
         while hasattr(inner, "steps"):
             inner = inner.steps[-1][1]
