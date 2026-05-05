@@ -66,8 +66,10 @@ services:
     environment:
       MLFLOW_TRACKING_URI: http://mlflow:5000
       PUSHGATEWAY_URL: http://pushgateway:9091
+      GIT_PYTHON_REFRESH: quiet
     volumes:
       - ./outputs:/app/outputs
+      - mlflow-data:/mlflow
     depends_on:
       mlflow:
         condition: service_healthy
